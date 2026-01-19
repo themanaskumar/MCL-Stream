@@ -56,7 +56,7 @@ const VideoAnalysis = () => {
   };
 
   return (
-    <div className="container">
+    <Layout>
       <h2>VIDEO ANALYSIS - MCL STREAM</h2>
 
       <div 
