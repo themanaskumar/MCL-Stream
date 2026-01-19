@@ -1,11 +1,12 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import Layout from "../components/Layout";
 
 const Home = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="container">
+    <Layout>
       <h2>Choose from below options</h2>
 
       <div className="button-group">
@@ -13,7 +14,7 @@ const Home = () => {
         <button onClick={() => navigate("/video")}>VIDEO ANALYSIS</button>
         <button onClick={() => navigate("/live")}>LIVE ANALYSIS</button>
       </div>
-    </div>
+    </Layout>
   );
 };
 

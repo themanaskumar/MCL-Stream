@@ -1,14 +1,33 @@
-import React from "react";
+import React, { useState } from "react";
+import Layout from "../components/Layout";
 
 const ImageAnalysis = () => {
+  const [image, setImage] = useState(null);
+
   return (
-    <div className="container">
+    <Layout>
       <h2>IMAGE ANALYSIS - MCL STREAM</h2>
 
-      <div className="upload-box">
-        <p>Drag Your Image Here</p>
+      <div
+        className="upload-box"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          setImage(e.dataTransfer.files[0]);
+        }}
+      >
+        <p>{image ? image.name : "Drag Your Image Here"}</p>
         <p>or</p>
-        <span className="link">Choose Image</span>
+
+        <label className="link">
+          Choose Image
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => setImage(e.target.files[0])}
+          />
+        </label>
       </div>
 
       <button className="action-btn">ANALYZE IMAGE</button>
@@ -16,7 +35,7 @@ const ImageAnalysis = () => {
       <div className="result-box">
         Result will be displayed here (fake/real)
       </div>
-    </div>
+    </Layout>
   );
 };
 

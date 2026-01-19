@@ -1,22 +1,43 @@
-import React from "react";
+import React, { useState } from "react";
+import Layout from "../components/Layout";
 
 const VideoAnalysis = () => {
+  const [video, setVideo] = useState(null);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setVideo(e.dataTransfer.files[0]);
+  };
+
   return (
-    <div className="container">
+    <Layout>
       <h2>VIDEO ANALYSIS - MCL STREAM</h2>
 
-      <div className="upload-box">
-        <p>Drag Your Video Here</p>
+      <div
+        className="upload-box"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+      >
+        <p>{video ? video.name : "Drag Your Video Here"}</p>
         <p>or</p>
-        <span className="link">Choose Video</span>
+
+        <label className="link">
+          Choose Video
+          <input
+            type="file"
+            hidden
+            accept="video/*"
+            onChange={(e) => setVideo(e.target.files[0])}
+          />
+        </label>
       </div>
 
       <button className="action-btn">ANALYZE VIDEO</button>
 
       <div className="result-box">
-        Result will be displayed here (fake/real)
+        Result will be displayed here
       </div>
-    </div>
+    </Layout>
   );
 };
 
