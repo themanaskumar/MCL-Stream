@@ -3,7 +3,7 @@ import React from "react";
 const Footer = () => {
   return (
     <div className="footer">
-      <p>FOOTER GOES HERE</p>
+      <p>&copy; 2026 MCL-STREAM Project. Developed by Manas Kumar.</p>
     </div>
   );
 };

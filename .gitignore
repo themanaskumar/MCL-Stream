@@ -1,0 +1,14 @@
+# Ignore ML Models
+*.h5
+*.keras
+*.tflite
+*.pt
+*.pth
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore environment
+venv/
+.env

@@ -7,11 +7,10 @@ const Home = () => {
   return (
     <div className="container">
       <h2>Choose from below options</h2>
-
       <div className="button-group">
-        <button onClick={() => navigate("/image")}>IMAGE ANALYSIS</button>
-        <button onClick={() => navigate("/video")}>VIDEO ANALYSIS</button>
-        <button onClick={() => navigate("/live")}>LIVE ANALYSIS</button>
+        <button className="nav-btn" onClick={() => navigate("/image")}>IMAGE ANALYSIS</button>
+        <button className="nav-btn" onClick={() => navigate("/video")}>VIDEO ANALYSIS</button>
+        <button className="nav-btn" onClick={() => navigate("/live")}>LIVE ANALYSIS</button>
       </div>
     </div>
   );

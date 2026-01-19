@@ -1,88 +1,171 @@
+/* App.css */
+:root {
+  --primary-gradient: linear-gradient(to right, #2b2eff, #3a3fff);
+  --bg-gradient: linear-gradient(to right, #000000, #0a0a4a, #000000);
+  --box-bg: rgba(128, 128, 128, 0.2); /* Glass-like grey */
+  --text-color: #ffffff;
+  --accent-color: #00bfff;
+}
+
 body {
   margin: 0;
-  font-family: Arial, sans-serif;
-  background: linear-gradient(to right, #020024, #090979, #020024);
-  color: white;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background: var(--bg-gradient);
+  color: var(--text-color);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Header */
 .header {
-  background: linear-gradient(to right, #2b2eff, #3a3fff);
-  padding: 15px;
+  background: var(--primary-gradient);
+  padding: 1rem;
   text-align: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
 }
 
 /* Footer */
 .footer {
-  background: linear-gradient(to right, #2b2eff, #3a3fff);
+  background: var(--primary-gradient);
   padding: 10px;
   text-align: center;
   position: fixed;
   width: 100%;
   bottom: 0;
+  font-size: 0.8rem;
 }
 
-/* Main Container */
+/* Main Layout */
 .container {
+  flex: 1; /* Pushes footer down */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 60px; /* Space for footer */
+  min-height: 80vh;
+}
+
+h2 {
+  font-weight: 300;
+  letter-spacing: 1px;
+  margin-bottom: 2rem;
+  text-transform: uppercase;
   text-align: center;
-  padding: 60px 20px;
 }
 
 /* Buttons */
 .button-group {
   display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 30px;
-  margin-top: 40px;
 }
 
-button {
-  padding: 15px 30px;
-  border-radius: 25px;
+.action-btn, .nav-btn {
+  padding: 15px 40px;
+  border-radius: 50px;
   border: none;
-  background: #3a3fff;
+  background: linear-gradient(135deg, #3a3fff 0%, #2b2eff 100%);
   color: white;
-  font-size: 16px;
+  font-size: 1rem;
+  font-weight: bold;
   cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  text-transform: uppercase;
+  min-width: 200px;
 }
 
-button:hover {
-  background: #5558ff;
+.action-btn:hover, .nav-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 20px rgba(58, 63, 255, 0.6);
 }
 
-/* Upload Box */
+/* Upload & Video Boxes */
 .upload-box {
-  background: gray;
-  width: 280px;
-  height: 180px;
-  margin: 30px auto;
-  border-radius: 15px;
+  background: var(--box-bg);
+  border: 2px dashed #555;
+  width: 300px;
+  height: 250px;
+  margin: 20px auto;
+  border-radius: 20px;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
+  transition: border-color 0.3s;
+  position: relative;
+}
+
+.upload-box:hover {
+  border-color: var(--accent-color);
+  background: rgba(128, 128, 128, 0.3);
+}
+
+.upload-text {
+  color: #ccc;
+  margin-bottom: 10px;
 }
 
 .link {
-  color: #00bfff;
+  color: var(--accent-color);
   cursor: pointer;
+  text-decoration: underline;
 }
 
-/* Live Video Box */
+.preview-media {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 15px;
+  object-fit: contain;
+}
+
+/* Live Box */
 .live-box {
-  background: gray;
-  width: 60%;
-  height: 300px;
-  margin: 30px auto;
+  background: black;
+  width: 80%;
+  max-width: 800px;
+  height: 450px; /* 16:9 aspect ratio approximation */
+  margin: 20px auto;
   display: flex;
   align-items: center;
   justify-content: center;
+  border: 2px solid #333;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
-/* Result */
+.live-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Result Box */
 .result-box {
-  background: #555;
-  padding: 15px;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 20px;
   width: 300px;
-  margin: 20px auto;
-  border-radius: 8px;
+  margin-top: 30px;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: bold;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.result-fake { color: #ff4d4d; }
+.result-real { color: #00e676; }
+
+.upload-box.drag-active {
+  border-color: #00e676; /* Green border when dragging */
+  background: rgba(0, 230, 118, 0.1);
+  transform: scale(1.02);
 }
