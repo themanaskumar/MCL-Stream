@@ -82,7 +82,7 @@ const ImageAnalysis = () => {
   };
 
   return (
-    <Layout>
+    <div>
       <h2>IMAGE ANALYSIS - MCL STREAM</h2>
 
       <div 

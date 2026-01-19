@@ -7,7 +7,7 @@ const Home = () => {
 
   return (
     <Layout>
-      <h2>Choose from below options</h2>
+      <h2>BE A DETECTIVE</h2>
       <div className="button-group">
         <button className="nav-btn" onClick={() => navigate("/image")}>IMAGE ANALYSIS</button>
         <button className="nav-btn" onClick={() => navigate("/video")}>VIDEO ANALYSIS</button>
