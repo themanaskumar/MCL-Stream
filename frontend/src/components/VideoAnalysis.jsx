@@ -5,7 +5,8 @@ const VideoAnalysis = () => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false); // Visual state for drag
+  const [error, setError] = useState(null); // Added error state
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
   // Helper to process the file (used by both Input and Drop)
@@ -14,6 +15,7 @@ const VideoAnalysis = () => {
       setSelectedVideo(file);
       setPreviewUrl(URL.createObjectURL(file));
       setResult(null);
+      setError(null); // Clear previous errors
     } else {
       alert("Please upload a valid video file (e.g., mp4, webm).");
     }
@@ -26,7 +28,7 @@ const VideoAnalysis = () => {
 
   // --- DRAG AND DROP HANDLERS ---
   const handleDragOver = (e) => {
-    e.preventDefault(); // Prevents browser from opening the file
+    e.preventDefault(); 
     setIsDragging(true);
   };
 
@@ -36,7 +38,7 @@ const VideoAnalysis = () => {
   };
 
   const handleDrop = (e) => {
-    e.preventDefault(); // Prevents browser from opening the file
+    e.preventDefault(); 
     setIsDragging(false);
     
     const file = e.dataTransfer.files[0];
@@ -44,15 +46,38 @@ const VideoAnalysis = () => {
   };
   // ------------------------------
 
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     if (!selectedVideo) return alert("Please upload a video first.");
-    setLoading(true);
     
-    // Mock Backend Call
-    setTimeout(() => {
+    setLoading(true);
+    setResult(null);
+    setError(null);
+    
+    // 1. Package the video into a FormData object
+    const formData = new FormData();
+    formData.append("video", selectedVideo);
+
+    try {
+      // 2. Make the POST request to your Django backend
+      const response = await fetch("http://127.0.0.1:8000/api/analyze-video/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server Error: ${response.statusText}`);
+      }
+
+      // 3. Parse the JSON response
+      const data = await response.json();
+      setResult(data);
+
+    } catch (err) {
+      console.error("Analysis failed:", err);
+      setError("Failed to reach the server. Make sure your Django backend is running.");
+    } finally {
       setLoading(false);
-      setResult("REAL (99.1% Confidence)");
-    }, 3000);
+    }
   };
 
   return (
@@ -65,6 +90,7 @@ const VideoAnalysis = () => {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        style={{ cursor: 'pointer' }} // Added for better UX
       >
         <input 
           type="file" 
@@ -75,25 +101,49 @@ const VideoAnalysis = () => {
         />
         
         {previewUrl ? (
-          <video src={previewUrl} controls className="preview-media" />
+          <video src={previewUrl} controls className="preview-media" style={{ maxWidth: '100%' }} />
         ) : (
           <>
             <p className="upload-text">
               {isDragging ? "Drop Video Here!" : "Drag Your Video Here"}
             </p>
             <p className="upload-text">or</p>
-            <span className="link">Choose Video</span>
+            <span className="link" style={{ color: '#007BFF', textDecoration: 'underline' }}>Choose Video</span>
           </>
         )}
       </div>
 
-      <button className="action-btn" onClick={handleAnalyze} disabled={loading}>
-        {loading ? "PROCESSING..." : "ANALYZE VIDEO"}
+      <button 
+        className="action-btn" 
+        onClick={handleAnalyze} 
+        disabled={loading || !selectedVideo}
+        style={{ marginTop: '15px' }}
+      >
+        {loading ? "🎬 EXTRACTING FRAMES & PROCESSING..." : "ANALYZE VIDEO"}
       </button>
 
+      {/* Error Display */}
+      {error && (
+        <div style={{ color: "red", marginTop: "15px", fontWeight: "bold" }}>
+          ❌ {error}
+        </div>
+      )}
+
+      {/* Dynamic Result Display */}
       {result && (
-        <div className="result-box">
-          Status: <span className={result.includes("FAKE") ? "result-fake" : "result-real"}>{result}</span>
+        <div className="result-box" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ccc', borderRadius: '8px' }}>
+          <h3>
+            Status: {" "}
+            <span className={result.status === "FAKE" ? "result-fake" : "result-real"} style={{ color: result.status === "FAKE" ? "red" : "green" }}>
+              {result.status}
+            </span>
+          </h3>
+          <p><strong>Confidence:</strong> {result.confidence}%</p>
+          <p><strong>Frames Analyzed:</strong> {result.frames_analyzed}</p>
+          <p style={{ fontSize: '0.85em', color: '#666', marginTop: '10px' }}>
+            <em>{result.note}</em> <br/>
+            Engine: {result.architecture_used}
+          </p>
         </div>
       )}
     </div>
