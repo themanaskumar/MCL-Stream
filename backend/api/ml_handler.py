@@ -9,22 +9,19 @@ from django.conf import settings
 
 # --- 1. GLOBAL MODEL LOADING (Runs once at startup) ---
 
-# Paths to your models
 BASE_DIR = settings.BASE_DIR
-MODEL_PATH = os.path.join(BASE_DIR, 'api', 'ml_models', 'deepfake_xception_tpu_v5.keras')
+MODEL_PATH = os.path.join(BASE_DIR, 'api', 'ml_models', 'xception_deepfake_image_5o.h5')
 DETECTOR_PATH = os.path.join(BASE_DIR, 'api', 'ml_models', 'detector.tflite')
 
-print("⏳ Loading ML Models... This may take a moment.")
+print("⏳ Loading Image ML Models... This may take a moment.")
 
-# Load Deepfake Model
 try:
     deepfake_model = keras.models.load_model(MODEL_PATH)
-    print("✅ Deepfake Model Loaded.")
+    print("✅ Deepfake Image Model Loaded.")
 except Exception as e:
-    print(f"❌ Failed to load Deepfake Model: {e}")
+    print(f"❌ Failed to load Deepfake Image Model: {e}")
     deepfake_model = None
 
-# Load Face Detector
 try:
     base_options = python.BaseOptions(model_asset_path=DETECTOR_PATH)
     options = vision.FaceDetectorOptions(
@@ -39,64 +36,54 @@ except Exception as e:
 
 # --- 2. CORE FUNCTIONS ---
 
-def predict_single_face(img_rgb):
+def predict_single_face(img_bgr):
     """
-    Takes an RGB numpy array (cropped face or full image),
-    resizes it to 300x300, and returns confidence.
+    Takes a BGR numpy array to match the Kaggle author's training format,
+    resizes it to 224x224, normalizes to [0, 1], and returns confidence.
     """
-    # Resize to model's expected input
-    img_resized = cv2.resize(img_rgb, (300, 300))
+    # 1. Resize the BGR image
+    img_resized = cv2.resize(img_bgr, (224, 224))
     
-    # Preprocessing
-    img_array = keras.utils.img_to_array(img_resized)
+    # 2. Preprocessing & Normalization
+    img_array = np.array(img_resized, dtype=np.float32)
+    img_array = img_array / 255.0  
     img_array = np.expand_dims(img_array, axis=0)
     
-    # Prediction
+    # 3. Prediction
     prediction = deepfake_model.predict(img_array, verbose=0)
-    score = prediction[0][0] # Raw probability
+    score = float(prediction[0][0])
 
-    # Logic: Assuming 0 = Fake, 1 = Real (or vice versa based on your training)
-    # Adjust this logic based on your specific training labels!
-    # Common Xception setup: 0=Fake, 1=Real. 
-    # If score > 0.5 -> Real.
-    
-    label = "REAL" if score > 0.5 else "FAKE"
-    confidence = score if score > 0.5 else (1 - score)
+    # 4. Logic: > 0.5 is FAKE
+    label = "FAKE" if score > 0.5 else "REAL"
+    confidence = score if score > 0.5 else (1.0 - score)
     
     return {
         "label": label,
-        "confidence": float(confidence), # Convert numpy float to python float
+        "confidence": float(confidence),
         "raw_score": float(score)
     }
 
 def analyze_image_pipeline(image_path):
-    """
-    Main entry point. 
-    1. Check image size.
-    2. If large, detect faces -> crop -> predict.
-    3. If small or no faces, predict full frame.
-    """
     if deepfake_model is None or detector is None:
         return {"error": "Models not loaded correctly"}
 
-    # Read Image
+    # Read Image in BGR (For the Model)
     img_bgr = cv2.imread(image_path)
     if img_bgr is None:
         return {"error": "Could not read image file"}
     
+    # Convert to RGB (Strictly for MediaPipe Face Detection)
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     h, w, _ = img_rgb.shape
     
     results = []
 
-    # Decide Strategy: Face Detect vs Direct
     SIZE_THRESHOLD = 500
     should_detect_faces = (w > SIZE_THRESHOLD or h > SIZE_THRESHOLD)
 
     faces_found = 0
 
     if should_detect_faces:
-        # Create MediaPipe Image
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
         detection_result = detector.detect(mp_image)
         
@@ -107,30 +94,28 @@ def analyze_image_pipeline(image_path):
             for i, detection in enumerate(detection_result.detections):
                 bbox = detection.bounding_box
                 
-                # Coordinate extraction with padding
                 x, y, bw, bh = bbox.origin_x, bbox.origin_y, bbox.width, bbox.height
                 pad_w, pad_h = int(bw * 0.25), int(bh * 0.25)
                 
                 x1, y1 = max(0, x - pad_w), max(0, y - pad_h)
                 x2, y2 = min(w, x + bw + pad_w), min(h, y + bh + pad_h)
 
-                face_crop = img_rgb[y1:y2, x1:x2]
+                # CRITICAL CHANGE: We crop from the BGR image, not the RGB image!
+                face_crop_bgr = img_bgr[y1:y2, x1:x2]
                 
-                if face_crop.size > 0:
-                    res = predict_single_face(face_crop)
+                if face_crop_bgr.size > 0:
+                    res = predict_single_face(face_crop_bgr)
                     res['face_index'] = i + 1
                     results.append(res)
         else:
             print("⚠️ Large image but no faces found. Running full frame.")
     
-    # Fallback: If image is small OR no faces found in large image
+    # Fallback if no faces found
     if not results:
-        res = predict_single_face(img_rgb)
+        res = predict_single_face(img_bgr) # Pass the BGR image
         res['note'] = "Full Frame Analysis"
         results.append(res)
 
-    # Aggregation Logic: 
-    # If ANY face is FAKE, the overall status is FAKE.
     overall_status = "REAL"
     avg_confidence = 0
     
@@ -138,9 +123,8 @@ def analyze_image_pipeline(image_path):
         if r['label'] == "FAKE":
             overall_status = "FAKE"
             avg_confidence = r['confidence']
-            break # Fail fast (Security approach)
+            break 
         else:
-            # If all are real, take average confidence
             avg_confidence += r['confidence']
     
     if overall_status == "REAL" and len(results) > 0:
