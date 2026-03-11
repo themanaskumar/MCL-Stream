@@ -1,22 +1,38 @@
 import React, { useState, useRef, useEffect } from "react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
+} from "recharts";
 
 const LiveAnalysis = () => {
   const [isStreaming, setIsStreaming] = useState(false);
-  const [liveResult, setLiveResult] = useState({ status: "Waiting for stream...", confidence: null });
   
+  // Track Video and Audio results separately
+  const [videoResult, setVideoResult] = useState({ status: "Waiting...", confidence: null });
+  const [audioResult, setAudioResult] = useState({ status: "Waiting...", confidence: null });
+  
+  // Chart Data State
+  const [chartData, setChartData] = useState([]);
+
+  // Refs for tracking current values to feed the chart interval
+  const latestScores = useRef({ video: 0, audio: 0 });
+
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const intervalRef = useRef(null);
   
-  // New Refs for WebSockets and Frame Extraction
+  // Loop Refs
+  const videoIntervalRef = useRef(null);
+  const audioIntervalRef = useRef(null);
+  const chartIntervalRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
   const wsRef = useRef(null);
   const canvasRef = useRef(document.createElement("canvas"));
 
   const startScreenShare = async () => {
     try {
+      // 1. Request BOTH video and audio
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: false, 
+        audio: true, // IMPORTANT: User must check "Share tab audio" in the popup
       });
 
       streamRef.current = stream;
@@ -24,33 +40,44 @@ const LiveAnalysis = () => {
         videoRef.current.srcObject = stream;
       }
       setIsStreaming(true);
-      setLiveResult({ status: "Connecting to server...", confidence: null });
+      setVideoResult({ status: "Connecting...", confidence: null });
+      setAudioResult({ status: "Connecting...", confidence: null });
+      setChartData([]); // Reset chart
 
-      // 1. Open the WebSocket connection to Django
+      // 2. Open WebSocket
       wsRef.current = new WebSocket("ws://127.0.0.1:8000/ws/live-stream/");
 
       wsRef.current.onopen = () => {
         console.log("✅ WebSocket Connected");
-        setLiveResult({ status: "Extracting frames...", confidence: null });
-        startAnalysisLoop(); // Only start sending frames ONCE the tunnel is open
+        startVideoAnalysisLoop();
+        startAudioAnalysisLoop(stream);
+        startChartLoop(); // Start recording data points for the chart
       };
 
-      // 2. Listen for predictions coming back from Django
       wsRef.current.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.status) {
-          setLiveResult({ status: data.status, confidence: data.confidence });
-        } else if (data.error) {
-          console.error("Server Error:", data.error);
+        
+        // Convert confidence to a "Fake Probability" (0-100) for the chart
+        let fakeProb = 0;
+        if (data.status === "FAKE") {
+            fakeProb = data.confidence;
+        } else if (data.status === "REAL") {
+            fakeProb = 100 - data.confidence;
+        }
+
+        if (data.type === "video_result") {
+          setVideoResult({ status: data.status, confidence: data.confidence });
+          latestScores.current.video = fakeProb;
+        } else if (data.type === "audio_result") {
+          setAudioResult({ status: data.status, confidence: data.confidence });
+          latestScores.current.audio = fakeProb;
         }
       };
 
       wsRef.current.onerror = (error) => {
         console.error("❌ WebSocket Error:", error);
-        setLiveResult({ status: "Connection Error. Is Django running?", confidence: null });
       };
 
-      // Handle user clicking "Stop Sharing" from the browser's native UI
       stream.getVideoTracks()[0].onended = () => {
         stopScreenShare();
       };
@@ -60,64 +87,105 @@ const LiveAnalysis = () => {
     }
   };
 
-  const stopScreenShare = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setIsStreaming(false);
-    setLiveResult({ status: "Analysis Stopped", confidence: null });
-    
-    // Clear the analysis loop
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
+  const startAudioAnalysisLoop = (stream) => {
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      setAudioResult({ status: "No Audio Track Shared", confidence: null });
+      return;
     }
 
-    // 3. Gracefully close the WebSocket
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    const audioOnlyStream = new MediaStream([audioTracks[0]]);
+
+    // Every 1.5 seconds, we boot up a brand new recorder
+    audioIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+
+      const mediaRecorder = new MediaRecorder(audioOnlyStream);
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      // When the recorder stops, it packages the chunk WITH a fresh header
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = () => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ audio: reader.result }));
+          }
+        };
+      };
+
+      // Start recording...
+      mediaRecorder.start();
+
+      // ...and force it to stop right before the next loop starts
+      setTimeout(() => {
+        if (mediaRecorder.state === "recording") {
+          mediaRecorder.stop();
+        }
+      }, 1450); // 1450ms ensures it closes cleanly before the 1500ms interval fires again
+
+    }, 1500); 
   };
 
-  const startAnalysisLoop = () => {
-    // 4. Extract and send frames at 3 FPS (333ms intervals)
-    intervalRef.current = setInterval(() => {
-      // Ensure video is playing and WebSocket is ready
-      if (videoRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+  const startVideoAnalysisLoop = () => {
+    videoIntervalRef.current = setInterval(() => {
+      if (videoRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
 
-        // Match the hidden canvas size to the actual video stream size
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
         }
 
-        // Draw the current video frame onto the canvas
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        // Convert the canvas drawing into a Base64 JPEG string (0.8 quality for speed)
-        const frameData = canvas.toDataURL("image/jpeg", 0.8);
-
-        // Package it into JSON and fire it down the WebSocket
+        const frameData = canvas.toDataURL("image/jpeg", 0.7);
         wsRef.current.send(JSON.stringify({ image: frameData }));
       }
     }, 333); 
   };
 
-  // Cleanup to ensure WebSockets don't stay open if the user navigates away
+  const startChartLoop = () => {
+    // Sample the latest scores every 1 second to draw the chart
+    chartIntervalRef.current = setInterval(() => {
+      const timeString = new Date().toLocaleTimeString([], { hour12: false, minute: '2-digit', second:'2-digit' });
+      
+      setChartData(prevData => {
+        const newData = [...prevData, { 
+            time: timeString, 
+            video: latestScores.current.video, 
+            audio: latestScores.current.audio 
+        }];
+        // Keep only the last 20 data points so it scrolls cleanly
+        return newData.length > 20 ? newData.slice(newData.length - 20) : newData;
+      });
+    }, 1000);
+  };
+
+  const stopScreenShare = () => {
+    if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+    if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+    if (audioIntervalRef.current) clearInterval(audioIntervalRef.current);
+    if (chartIntervalRef.current) clearInterval(chartIntervalRef.current);
+    if (wsRef.current) wsRef.current.close();
+    
+    setIsStreaming(false);
+  };
+
   useEffect(() => {
-    return () => {
-      stopScreenShare();
-    };
+    return () => stopScreenShare();
   }, []);
 
   return (
-    <div className="container">
+    <div className="container" style={{ paddingBottom: '50px' }}>
       <h2>LIVE ANALYSIS - MCL STREAM</h2>
 
       <div className="live-box" style={{ position: 'relative', width: '100%', maxWidth: '800px', margin: '0 auto' }}>
@@ -136,32 +204,69 @@ const LiveAnalysis = () => {
         )}
       </div>
 
-      <button 
-        className="action-btn" 
-        onClick={isStreaming ? stopScreenShare : startScreenShare}
-        style={{ 
-          backgroundColor: isStreaming ? '#ff4d4d' : '#007bff', 
-          color: '#fff', 
-          padding: '10px 20px', 
-          marginTop: '20px', 
-          border: 'none', 
-          borderRadius: '5px', 
-          cursor: 'pointer' 
-        }}
-      >
-        {isStreaming ? "STOP LIVE ANALYSIS" : "START LIVE ANALYSIS"}
-      </button>
-
-      <div className="result-box" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ccc', borderRadius: '8px', textAlign: 'center' }}>
-        <h3>
-          Status: <span style={{ color: liveResult.status === "FAKE" ? "red" : liveResult.status === "REAL" ? "green" : "black" }}>
-            {liveResult.status}
-          </span>
-        </h3>
-        {liveResult.confidence && (
-          <p><strong>Confidence:</strong> {liveResult.confidence}%</p>
-        )}
+      <div style={{ textAlign: 'center' }}>
+        <button 
+          className="action-btn" 
+          onClick={isStreaming ? stopScreenShare : startScreenShare}
+          style={{ 
+            backgroundColor: isStreaming ? '#ff4d4d' : '#007bff', 
+            color: '#fff', 
+            padding: '12px 24px', 
+            marginTop: '20px', 
+            border: 'none', 
+            borderRadius: '5px', 
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          {isStreaming ? "STOP LIVE ANALYSIS" : "START LIVE ANALYSIS"}
+        </button>
       </div>
+
+      {/* DUAL RESULTS DASHBOARD */}
+      <div className="results-wrapper">
+        <div className="result-box">
+          <h3 style={{ margin: '0 0 10px 0', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '10px' }}>📸 Video Scan</h3>
+          <h2 className={videoResult.status === "FAKE" ? "result-fake" : videoResult.status === "REAL" ? "result-real" : ""}>
+            {videoResult.status}
+          </h2>
+          {videoResult.confidence && <p style={{ fontSize: '0.9rem', color: '#ccc' }}>Confidence: {videoResult.confidence}%</p>}
+        </div>
+
+        <div className="result-box">
+          <h3 style={{ margin: '0 0 10px 0', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '10px' }}>🎤 Audio Scan</h3>
+          <h2 className={audioResult.status === "FAKE" ? "result-fake" : audioResult.status === "REAL" ? "result-real" : ""}>
+            {audioResult.status}
+          </h2>
+          {audioResult.confidence && <p style={{ fontSize: '0.9rem', color: '#ccc' }}>Confidence: {audioResult.confidence}%</p>}
+        </div>
+      </div>
+
+      {/* REAL-TIME CHART */}
+      {chartData.length > 0 && (
+        <div className="chart-container">
+          <h3 className="chart-title">Deepfake Probability Tracker</h3>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chartData} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.15} stroke="#ffffff" />
+              
+              {/* Note: Recharts SVG elements require inline props for text color */}
+              <XAxis dataKey="time" tick={{ fontSize: 12, fill: '#cccccc' }} stroke="#555" />
+              <YAxis domain={[0, 100]} tickFormatter={(tick) => `${tick}%`} tick={{ fill: '#cccccc' }} stroke="#555" />
+              
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#000', borderColor: '#333', color: '#fff' }} 
+                formatter={(value) => `${value.toFixed(1)}% Fake Prob.`} 
+              />
+              <Legend wrapperStyle={{ color: '#ccc' }} />
+              
+              <ReferenceLine y={50} stroke="#ff4d4d" strokeDasharray="3 3" label={{ position: 'top', value: 'FAKE THRESHOLD', fill: '#ff4d4d', fontSize: 12 }} />
+              <Line type="monotone" dataKey="video" name="Video Anomaly" stroke="#00d4ff" strokeWidth={3} dot={false} animationDuration={300} />
+              <Line type="monotone" dataKey="audio" name="Audio Anomaly" stroke="#b145e9" strokeWidth={3} dot={false} animationDuration={300} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 };

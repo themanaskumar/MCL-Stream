@@ -1,87 +1,101 @@
+import os
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
-from .ml_handler import analyze_image_pipeline
-from rest_framework import status
-import tempfile
-import os
 
+# Import your pipelines
+from .video_pipeline import analyze_video_pipeline
+from .audio_pipeline import extract_audio_from_video, analyze_audio
+
+# 🛠️ THE FIX: Import from ml_handler and get the exact function name
+from .ml_handler import analyze_image_pipeline
+
+# --- 1. UPDATED IMAGE VIEW ---
 class ImageAnalysisView(APIView):
     parser_classes = (MultiPartParser, FormParser)
 
     def post(self, request, *args, **kwargs):
-        file_obj = request.FILES.get('image')
+        if 'image' not in request.FILES:
+            return Response({"error": "No image uploaded"}, status=400)
         
-        if not file_obj:
-            return Response({"error": "No image provided"}, status=400)
-
-        # 1. Save file temporarily
-        file_path = default_storage.save(f"temp/{file_obj.name}", ContentFile(file_obj.read()))
-        full_file_path = os.path.join(default_storage.location, file_path)
-
+        image_file = request.FILES['image']
+        
+        # 🛠️ Save temporarily because ml_handler expects a file path
+        image_path = default_storage.save(f"temp/{image_file.name}", image_file)
+        full_image_path = os.path.join(default_storage.location, image_path)
+        
         try:
-            # 2. Run Analysis
-            result = analyze_image_pipeline(full_file_path)
+            # Pass the path to your actual function
+            result = analyze_image_pipeline(full_image_path) 
             
-            # 3. Clean up (delete temp file)
-            if os.path.exists(full_file_path):
-                os.remove(full_file_path)
-
+            # Clean up the temp file
+            if os.path.exists(full_image_path):
+                os.remove(full_image_path)
+                
             return Response(result)
-
         except Exception as e:
-            # Cleanup on error
-            if os.path.exists(full_file_path):
-                os.remove(full_file_path)
+            # Emergency clean up if it crashes
+            if os.path.exists(full_image_path):
+                os.remove(full_image_path)
             return Response({"error": str(e)}, status=500)
 
-# Video detection pipeline
-
-# Import your brand new video pipeline
-from .video_pipeline import analyze_video_pipeline
-
+# --- 2. RESTORED OLD VIDEO VIEW (Optional, but keeps urls.py happy) ---
 class VideoDetectionView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+
     def post(self, request, *args, **kwargs):
-        # 1. Check if a video was actually sent in the request
-        if 'video' not in request.FILES:
-            return Response(
-                {"error": "No video file provided in the request."}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # We will point this to the new dual-modality logic below!
+        return upload_video(request)
 
-        video_file = request.FILES['video']
-        temp_video_path = None
+# --- 3. NEW DUAL-MODALITY VIDEO & AUDIO VIEW ---
+@csrf_exempt
+def upload_video(request):
+    # This handles both standard Django requests and DRF requests
+    file_obj = request.FILES.get('video')
+    if not file_obj:
+         return JsonResponse({"error": "Invalid request or missing video file"}, status=400)
+        
+    # Save the uploaded .mp4 temporarily
+    video_path = default_storage.save(f"temp/{file_obj.name}", file_obj)
+    full_video_path = os.path.join(default_storage.location, video_path)
+    
+    # Define where the extracted .wav file will temporarily live
+    full_audio_path = full_video_path.replace('.mp4', '.wav')
 
-        try:
-            # 2. Save the uploaded file temporarily to the server's disk
-            # We add a .mp4 suffix so OpenCV knows how to read the codec
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_video:
-                for chunk in video_file.chunks():
-                    temp_video.write(chunk)
-                temp_video_path = temp_video.name
+    try:
+        # Scan the Video Track
+        print("🎬 Scanning Video Track...")
+        video_result = analyze_video_pipeline(full_video_path)
 
-            # 3. Pass the file path to our CNN-LSTM pipeline
-            print(f"🎬 Processing video: {video_file.name}...")
-            result = analyze_video_pipeline(temp_video_path)
+        # Separate and Scan the Audio Track
+        print("🎵 Extracting and Scanning Audio Track...")
+        has_audio = extract_audio_from_video(full_video_path, full_audio_path)
+        
+        if has_audio:
+            audio_result = analyze_audio(full_audio_path)
+        else:
+            audio_result = {"status": "NO_AUDIO", "confidence": 0}
 
-            # 4. Handle any internal pipeline errors
-            if "error" in result:
-                return Response(result, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # The Final Verdict Logic
+        overall_status = "REAL"
+        if video_result.get('status') == "FAKE" or audio_result.get('status') == "FAKE":
+            overall_status = "FAKE"
 
-            # 5. Return the successful prediction to the frontend
-            return Response(result, status=status.HTTP_200_OK)
+        # Clean up temporary files
+        if os.path.exists(full_video_path): os.remove(full_video_path)
+        if os.path.exists(full_audio_path): os.remove(full_audio_path)
 
-        except Exception as e:
-            print(f"❌ Server Error during video processing: {e}")
-            return Response(
-                {"error": "An error occurred while processing the video on the server."}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-            
-        finally:
-            # 6. CRITICAL: Always delete the temporary video to prevent memory leaks
-            if temp_video_path and os.path.exists(temp_video_path):
-                os.remove(temp_video_path)
-                print("🗑️ Temporary video file cleaned up.")
+        # Send response
+        return JsonResponse({
+            "overall_status": overall_status,
+            "video": video_result,
+            "audio": audio_result
+        })
+
+    except Exception as e:
+        if os.path.exists(full_video_path): os.remove(full_video_path)
+        if os.path.exists(full_audio_path): os.remove(full_audio_path)
+        return JsonResponse({"error": str(e)}, status=500)

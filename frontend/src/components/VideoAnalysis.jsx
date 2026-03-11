@@ -5,7 +5,7 @@ const VideoAnalysis = () => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null); // Added error state
+  const [error, setError] = useState(null); 
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -15,7 +15,7 @@ const VideoAnalysis = () => {
       setSelectedVideo(file);
       setPreviewUrl(URL.createObjectURL(file));
       setResult(null);
-      setError(null); // Clear previous errors
+      setError(null); 
     } else {
       alert("Please upload a valid video file (e.g., mp4, webm).");
     }
@@ -90,7 +90,7 @@ const VideoAnalysis = () => {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        style={{ cursor: 'pointer' }} // Added for better UX
+        style={{ cursor: 'pointer' }} 
       >
         <input 
           type="file" 
@@ -119,31 +119,45 @@ const VideoAnalysis = () => {
         disabled={loading || !selectedVideo}
         style={{ marginTop: '15px' }}
       >
-        {loading ? "🎬 EXTRACTING FRAMES & PROCESSING..." : "ANALYZE VIDEO"}
+        {loading ? "🎬 EXTRACTING & PROCESSING..." : "ANALYZE VIDEO"}
       </button>
 
       {/* Error Display */}
       {error && (
-        <div style={{ color: "red", marginTop: "15px", fontWeight: "bold" }}>
+        <div style={{ color: "red", marginTop: "15px", fontWeight: "bold", textAlign: "center" }}>
           ❌ {error}
         </div>
       )}
 
-      {/* Dynamic Result Display */}
+      {/* NEW DUAL-MODALITY RESULT DASHBOARD */}
       {result && (
-        <div className="result-box" style={{ marginTop: '20px', padding: '15px', border: '1px solid #ccc', borderRadius: '8px' }}>
-          <h3>
-            Status: {" "}
-            <span className={result.status === "FAKE" ? "result-fake" : "result-real"} style={{ color: result.status === "FAKE" ? "red" : "green" }}>
-              {result.status}
-            </span>
-          </h3>
-          <p><strong>Confidence:</strong> {result.confidence}%</p>
-          <p><strong>Frames Analyzed:</strong> {result.frames_analyzed}</p>
-          <p style={{ fontSize: '0.85em', color: '#666', marginTop: '10px' }}>
-            <em>{result.note}</em> <br/>
-            Engine: {result.architecture_used}
-          </p>
+        <div style={{ marginTop: '30px', padding: '20px', border: '1px solid #444', borderRadius: '12px', backgroundColor: '#0a0a2a', color: 'white', maxWidth: '700px', margin: '30px auto' }}>
+          
+          <h2 style={{ textAlign: 'center', color: result.overall_status === "FAKE" ? "#ff4d4d" : "#28a745", marginBottom: '20px' }}>
+            OVERALL VERDICT: {result.overall_status}
+          </h2>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '20px', flexWrap: 'wrap' }}>
+            
+            {/* VIDEO RESULTS */}
+            <div style={{ flex: 1, minWidth: '250px', padding: '15px', backgroundColor: '#11113a', borderRadius: '8px', border: '1px solid #333' }}>
+              <h3 style={{ textAlign: 'center', borderBottom: '1px solid #444', paddingBottom: '10px', marginTop: 0 }}>📸 Video Scan</h3>
+              <p><strong>Status:</strong> <span style={{ color: result.video?.status === "FAKE" ? "#ff4d4d" : "#28a745", fontWeight: 'bold' }}>{result.video?.status || "N/A"}</span></p>
+              <p><strong>Confidence:</strong> {result.video?.confidence ? `${result.video.confidence}%` : "N/A"}</p>
+              {result.video?.frames_analyzed && <p><strong>Frames Analyzed:</strong> {result.video.frames_analyzed}</p>}
+              <p style={{ fontSize: '0.8em', color: '#aaa', marginTop: '10px' }}>Engine: CNN-LSTM Hybrid</p>
+            </div>
+
+            {/* AUDIO RESULTS */}
+            <div style={{ flex: 1, minWidth: '250px', padding: '15px', backgroundColor: '#11113a', borderRadius: '8px', border: '1px solid #333' }}>
+              <h3 style={{ textAlign: 'center', borderBottom: '1px solid #444', paddingBottom: '10px', marginTop: 0 }}>🎤 Audio Scan</h3>
+              <p><strong>Status:</strong> <span style={{ color: result.audio?.status === "FAKE" ? "#ff4d4d" : result.audio?.status === "NO_AUDIO" ? "#ffcc00" : "#28a745", fontWeight: 'bold' }}>{result.audio?.status || "N/A"}</span></p>
+              <p><strong>Confidence:</strong> {result.audio?.confidence ? `${result.audio.confidence}%` : "N/A"}</p>
+              {result.audio?.status === "NO_AUDIO" && <p style={{ fontSize: '0.9em', color: '#ffcc00' }}>No audio track found in this video.</p>}
+              <p style={{ fontSize: '0.8em', color: '#aaa', marginTop: '10px' }}>Engine: 1D-CNN + BiLSTM</p>
+            </div>
+
+          </div>
         </div>
       )}
     </div>
