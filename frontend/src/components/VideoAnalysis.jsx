@@ -121,7 +121,7 @@ const VideoAnalysis = () => {
       >
         {loading ? "🎬 EXTRACTING & PROCESSING..." : "ANALYZE VIDEO"}
       </button>
-
+      
       {/* Error Display */}
       {error && (
         <div style={{ color: "red", marginTop: "15px", fontWeight: "bold", textAlign: "center" }}>

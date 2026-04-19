@@ -6,20 +6,15 @@ import {
 const LiveAnalysis = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   
-  // Track Video and Audio results separately
   const [videoResult, setVideoResult] = useState({ status: "Waiting...", confidence: null });
   const [audioResult, setAudioResult] = useState({ status: "Waiting...", confidence: null });
   
-  // Chart Data State
   const [chartData, setChartData] = useState([]);
-
-  // Refs for tracking current values to feed the chart interval
   const latestScores = useRef({ video: 0, audio: 0 });
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   
-  // Loop Refs
   const videoIntervalRef = useRef(null);
   const audioIntervalRef = useRef(null);
   const chartIntervalRef = useRef(null);
@@ -29,10 +24,9 @@ const LiveAnalysis = () => {
 
   const startScreenShare = async () => {
     try {
-      // 1. Request BOTH video and audio
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true, // IMPORTANT: User must check "Share tab audio" in the popup
+        audio: true, 
       });
 
       streamRef.current = stream;
@@ -42,22 +36,20 @@ const LiveAnalysis = () => {
       setIsStreaming(true);
       setVideoResult({ status: "Connecting...", confidence: null });
       setAudioResult({ status: "Connecting...", confidence: null });
-      setChartData([]); // Reset chart
+      setChartData([]); 
 
-      // 2. Open WebSocket
       wsRef.current = new WebSocket("ws://127.0.0.1:8000/ws/live-stream/");
 
       wsRef.current.onopen = () => {
         console.log("✅ WebSocket Connected");
         startVideoAnalysisLoop();
         startAudioAnalysisLoop(stream);
-        startChartLoop(); // Start recording data points for the chart
+        startChartLoop(); 
       };
 
       wsRef.current.onmessage = (event) => {
         const data = JSON.parse(event.data);
         
-        // Convert confidence to a "Fake Probability" (0-100) for the chart
         let fakeProb = 0;
         if (data.status === "FAKE") {
             fakeProb = data.confidence;
@@ -67,7 +59,11 @@ const LiveAnalysis = () => {
 
         if (data.type === "video_result") {
           setVideoResult({ status: data.status, confidence: data.confidence });
-          latestScores.current.video = fakeProb;
+          
+          // Only plot actual predictions on the chart, ignore "Buffering" or "No Face" strings
+          if (data.status === "FAKE" || data.status === "REAL") {
+              latestScores.current.video = fakeProb;
+          }
         } else if (data.type === "audio_result") {
           setAudioResult({ status: data.status, confidence: data.confidence });
           latestScores.current.audio = fakeProb;
@@ -78,9 +74,7 @@ const LiveAnalysis = () => {
         console.error("❌ WebSocket Error:", error);
       };
 
-      stream.getVideoTracks()[0].onended = () => {
-        stopScreenShare();
-      };
+      stream.getVideoTracks()[0].onended = () => stopScreenShare();
 
     } catch (err) {
       console.error("Error accessing screen:", err);
@@ -96,7 +90,6 @@ const LiveAnalysis = () => {
 
     const audioOnlyStream = new MediaStream([audioTracks[0]]);
 
-    // Every 1.5 seconds, we boot up a brand new recorder
     audioIntervalRef.current = setInterval(() => {
       if (wsRef.current?.readyState !== WebSocket.OPEN) return;
 
@@ -107,7 +100,6 @@ const LiveAnalysis = () => {
         if (e.data.size > 0) chunks.push(e.data);
       };
 
-      // When the recorder stops, it packages the chunk WITH a fresh header
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'audio/webm' });
         const reader = new FileReader();
@@ -119,16 +111,10 @@ const LiveAnalysis = () => {
         };
       };
 
-      // Start recording...
       mediaRecorder.start();
-
-      // ...and force it to stop right before the next loop starts
       setTimeout(() => {
-        if (mediaRecorder.state === "recording") {
-          mediaRecorder.stop();
-        }
-      }, 1450); // 1450ms ensures it closes cleanly before the 1500ms interval fires again
-
+        if (mediaRecorder.state === "recording") mediaRecorder.stop();
+      }, 1450); 
     }, 1500); 
   };
 
@@ -136,23 +122,37 @@ const LiveAnalysis = () => {
     videoIntervalRef.current = setInterval(() => {
       if (videoRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
         const video = videoRef.current;
+        if (!video.videoWidth) return; // Prevent crashing if video hasn't loaded yet
+
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
 
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+        // THE FIX: Smart Downscaling. Prevents WebSocket Payload Crashes.
+        const MAX_WIDTH = 640;
+        let canvasWidth = video.videoWidth;
+        let canvasHeight = video.videoHeight;
+
+        if (canvasWidth > MAX_WIDTH) {
+            const scale = MAX_WIDTH / canvasWidth;
+            canvasWidth = MAX_WIDTH;
+            canvasHeight = Math.floor(canvasHeight * scale);
         }
 
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const frameData = canvas.toDataURL("image/jpeg", 0.7);
+        if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+        }
+
+        context.drawImage(video, 0, 0, canvasWidth, canvasHeight);
+        
+        // 0.85 Quality drops file size massively while retaining ML-ready detail
+        const frameData = canvas.toDataURL("image/jpeg", 0.85); 
         wsRef.current.send(JSON.stringify({ image: frameData }));
       }
     }, 333); 
   };
 
   const startChartLoop = () => {
-    // Sample the latest scores every 1 second to draw the chart
     chartIntervalRef.current = setInterval(() => {
       const timeString = new Date().toLocaleTimeString([], { hour12: false, minute: '2-digit', second:'2-digit' });
       
@@ -162,7 +162,6 @@ const LiveAnalysis = () => {
             video: latestScores.current.video, 
             audio: latestScores.current.audio 
         }];
-        // Keep only the last 20 data points so it scrolls cleanly
         return newData.length > 20 ? newData.slice(newData.length - 20) : newData;
       });
     }, 1000);
@@ -223,7 +222,6 @@ const LiveAnalysis = () => {
         </button>
       </div>
 
-      {/* DUAL RESULTS DASHBOARD */}
       <div className="results-wrapper">
         <div className="result-box">
           <h3 style={{ margin: '0 0 10px 0', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '10px' }}>📸 Video Scan</h3>
@@ -242,24 +240,19 @@ const LiveAnalysis = () => {
         </div>
       </div>
 
-      {/* REAL-TIME CHART */}
       {chartData.length > 0 && (
         <div className="chart-container">
           <h3 className="chart-title">Deepfake Probability Tracker</h3>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 5, right: 20, left: -20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} stroke="#ffffff" />
-              
-              {/* Note: Recharts SVG elements require inline props for text color */}
               <XAxis dataKey="time" tick={{ fontSize: 12, fill: '#cccccc' }} stroke="#555" />
               <YAxis domain={[0, 100]} tickFormatter={(tick) => `${tick}%`} tick={{ fill: '#cccccc' }} stroke="#555" />
-              
               <Tooltip 
                 contentStyle={{ backgroundColor: '#000', borderColor: '#333', color: '#fff' }} 
                 formatter={(value) => `${value.toFixed(1)}% Fake Prob.`} 
               />
               <Legend wrapperStyle={{ color: '#ccc' }} />
-              
               <ReferenceLine y={50} stroke="#ff4d4d" strokeDasharray="3 3" label={{ position: 'top', value: 'FAKE THRESHOLD', fill: '#ff4d4d', fontSize: 12 }} />
               <Line type="monotone" dataKey="video" name="Video Anomaly" stroke="#00d4ff" strokeWidth={3} dot={false} animationDuration={300} />
               <Line type="monotone" dataKey="audio" name="Audio Anomaly" stroke="#b145e9" strokeWidth={3} dot={false} animationDuration={300} />

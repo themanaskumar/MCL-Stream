@@ -19,7 +19,7 @@ except Exception as e:
 MAX_PAD_LEN = 200
 MAX_SAMPLES = 24000  # 1.5 seconds at 16000 Hz
 
-# --- 2. AUDIO EXTRACTION ---
+# --- 2. AUDIO EXTRACTION (REST API) ---
 def extract_audio_from_video(video_path, output_wav_path):
     """
     Extracts the audio track from an .mp4 and saves it as a .wav file.
@@ -50,15 +50,24 @@ def extract_audio_from_video(video_path, output_wav_path):
             except:
                 pass
 
-# --- 3. PURE TENSORFLOW PREPROCESSING ---
-def preprocess_audio_for_inference(wav_path):
+# --- 3. PURE TENSORFLOW PREPROCESSING (RAM & DISK COMPATIBLE) ---
+def preprocess_audio_for_inference(audio_input):
     """
     The exact same native TensorFlow logic used during Kaggle training.
     """
-    audio_binary = tf.io.read_file(wav_path)
+    # 1. Check if the input is a string (File Path) or bytes (RAM)
+    if isinstance(audio_input, str):
+        # Read from Hard Drive
+        audio_binary = tf.io.read_file(audio_input)
+    else:
+        # 🛠️ THE FIX: Wrap the raw Python bytes in a TensorFlow String Tensor
+        audio_binary = tf.constant(audio_input)
+
+    # 2. Decode the WAV data
     audio, sample_rate = tf.audio.decode_wav(audio_binary, desired_channels=1)
     audio = tf.squeeze(audio, axis=-1)
     
+    # 3. Padding / Truncating
     audio_length = tf.shape(audio)[0]
     audio = tf.cond(
         audio_length < MAX_SAMPLES,
@@ -66,6 +75,7 @@ def preprocess_audio_for_inference(wav_path):
         lambda: audio[:MAX_SAMPLES]
     )
     
+    # 4. Spectrogram Math
     stft = tf.signal.stft(audio, frame_length=512, frame_step=118, fft_length=512)
     spectrogram = tf.abs(stft)
     
@@ -93,16 +103,16 @@ def preprocess_audio_for_inference(wav_path):
     return mel_spec_db
 
 # --- 4. PREDICTION FUNCTION ---
-def analyze_audio(wav_path):
+def analyze_audio(audio_input):
     """
-    Takes a .wav file, preprocesses it, and runs it through the Hybrid model.
+    Takes a .wav file path OR raw audio bytes, preprocesses it, and runs it through the Hybrid model.
     """
     if audio_model is None:
         return {"error": "Audio model not loaded"}
 
     try:
-        # 1. Preprocess the audio using TF
-        processed_tensor = preprocess_audio_for_inference(wav_path)
+        # 1. Preprocess the audio using TF (Handles both files and bytes dynamically)
+        processed_tensor = preprocess_audio_for_inference(audio_input)
         
         # 2. Add the batch dimension: (200, 128) -> (1, 200, 128)
         input_data = tf.expand_dims(processed_tensor, axis=0)
